@@ -579,7 +579,7 @@ registerProcessor("lamiera", LamieraProc);
   requestAnimationFrame(frame);
 
   // ---- audio ----
-  let ctx, bus, shaper, out, noiseBuf, wet, analyser, abuf, compOut, wkNode = null;
+  let ctx, bus, shaper, out, noiseBuf, wet, analyser, abuf, compOut, wkNode = null, wkChecked = false;
   const verbAmt = () => 0.1 + 0.9 * +$("verb").value;
   const voices = new Set();
   function ensureAudio(){
@@ -604,7 +604,9 @@ registerProcessor("lamiera", LamieraProc);
       const src = document.getElementById("lamiera-worklet").textContent;
       const url = URL.createObjectURL(new Blob([src], { type: "application/javascript" }));
       ctx.audioWorklet.addModule(url).then(() => {
-        wkNode = new AudioWorkletNode(ctx, "lamiera", { numberOfInputs: 0, outputChannelCount: [2] });
+        wkNode = new AudioWorkletNode(ctx, "lamiera", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [2] });
+        // Safari elabora un nodo worklet solo se ha un ingresso collegato: gli diamo una sorgente muta
+        try { const keep = ctx.createConstantSource(); keep.offset.value = 0; keep.connect(wkNode); keep.start(); } catch (e){}
         const g = ctx.createGain(); g.gain.value = 0.9; wkNode.connect(g); g.connect(bus);
         wkTuneAll();
       }).catch(() => {});
@@ -646,6 +648,14 @@ registerProcessor("lamiera", LamieraProc);
       wkNode.port.postMessage({ type: "strike", n, f, t60, e, v, hard, bloom: 0.00055, pan: pn, noise: 0.05 * v * (0.6 + 0.8 * e) * (0.5 + hard) });
       onStrike(n, f, vel, e, fromMidi, v);
       flash(n, t60, v, px, py, e);
+      // controllo al primo colpo: se il motore a risonatori resta muto (qualche browser), si torna agli oscillatori
+      if (!wkChecked){
+        wkChecked = true;
+        setTimeout(() => {
+          let q = 0; if (analyser){ analyser.getFloatTimeDomainData(abuf); for (let i = 0; i < abuf.length; i++) q += abuf[i] * abuf[i]; }
+          if (q / abuf.length < 1e-9){ try { wkNode.disconnect(); } catch (err){} wkNode = null; strike(n, vel, where, px, py, true); }
+        }, 120);
+      }
       return;
     }
     const pan = ctx.createStereoPanner();
