@@ -90,18 +90,21 @@ Each scale is tuned in just intonation on its own ding.
 
 Plain JavaScript and the Web Audio API, no WebAssembly and no libraries.
 
-Each strike runs through a **modal resonator bank** in an AudioWorklet: one set of resonators per tone field, each mode a complex one-pole resonator (a decaying sinusoid whose amplitude is exactly its input). The modes and their behaviour were measured from recordings of a real handpan ([luntal/HandPan](https://github.com/luntal/HandPan), Apache-2.0):
+Each strike runs through a **modal resonator bank** in an AudioWorklet: one set of resonators per tone field, each mode a complex one-pole resonator (a decaying sinusoid whose amplitude is exactly its input). The modes and their behaviour were measured from recordings of four different instruments: handpans and a Hang, about 80 single strikes, finger and mallet, analysed for partials, levels, bloom and decay.
 
-| what was measured | real handpan | lamiera |
+| what was measured | real instruments (range, typical) | lamiera |
 |---|---|---|
-| octave | 1.986–2.01 × f, −4…−21 dB, peaks 60–340 ms after the strike | two split modes at 1.992 and 2.006 × f (they beat), about −10 dB, peak around 150–250 ms |
-| twelfth | 2.98–3.01 × f, −7…−28 dB | 2.998 × f, about −20 dB, stronger towards the edge |
-| decay | fundamental T60 ≈ 6–9 s in the mid range; octave and twelfth ring about 1.4 × longer | T60 = 8.5 s × (196 Hz / f)^0.6, octave × 1.45, twelfth × 1.4 |
-| sympathy | the other notes of the instrument ring at −20…−35 dB | every strike leaks into the other fields, more where their partials coincide |
-| attack | rise 4–8 ms, a high noise burst ≈ −22 dB that falls 20 dB in 30–50 ms | finger contact pulse plus a short filtered noise burst |
+| octave | 1.975–2.01 × f, −4…−21 dB (typical −8…−13), peak 30–340 ms after the strike | two split modes at 1.992 and 2.006 × f that beat, about −8 dB, peak around 60–125 ms |
+| twelfth | 2.98–3.01 × f, −7…−28 dB (typical −15) | 2.998 × f, about −11 dB, stronger towards the edge and on hard strikes |
+| fourth harmonic | −13…−40 dB, often absent | about −23 dB |
+| decay | fundamental T60 2–6 s, nearly independent of pitch; octave and twelfth ring 1.3–2.1 × longer | T60 = 5.5 s × (196 Hz / f)^0.2, octave × 1.8, twelfth × 1.9 |
+| sympathy | the other notes ring at −18…−34 dB | every strike leaks into the other fields, more where their partials coincide: about −28 dB |
+| attack | high noise burst −28…−31 dB, falling 20 dB in 30–50 ms | about −31 dB |
+
+Sources: [luntal/HandPan](https://github.com/luntal/HandPan) (Apache-2.0), [arash-mohtat/hangdrum_py](https://github.com/arash-mohtat/hangdrum_py) (CC0, finger and mallet recordings), [jakobabesser/hang-buddy](https://github.com/jakobabesser/hang-buddy), [wutlu/hang](https://github.com/wutlu/hang) (GPL-3.0), [musicHK/air-handpan](https://github.com/musicHK/air-handpan). The recordings were only measured; none of them is included here.
 
 - **Bloom.** The octave and twelfth are not only struck directly: they are driven by the square of the fundamental (and by fundamental × octave), a quadratic coupling like the one in the steel shell. Energy flows from the fundamental into the octave over the first few hundred milliseconds, more on harder strikes.
-- **Exciter.** The finger is a raised-cosine contact force pulse, 0.7–2.6 ms long: harder strikes are shorter and reach higher modes. A short burst of lowpassed noise, different every time, adds the skin of the finger.
+- **Exciter.** The finger is a Gaussian contact force pulse (σ 0.1–0.36 ms, a smooth spectrum with no gaps): harder strikes are narrower and reach higher modes. A short burst of lowpassed noise, different every time, adds the skin of the finger.
 - **Strike position.** The fundamental mode is strongest at the centre of a field, the octave modes have a nodal line through it and peak towards the edge, the twelfth rises near the edge.
 - **Reverb.** A convolution with a synthetic 12 s impulse response that darkens as it fades.
 

@@ -259,7 +259,7 @@ class LamieraProc extends AudioWorkletProcessor {
   }
   tune(F, f, t60, dampFast){
     const ratios = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27];
-    const t60s = [t60, t60 * 1.45, t60 * 1.35, t60 * 1.4, t60 * 0.9, 0.22, 0.12];
+    const t60s = [t60, t60 * 1.8, t60 * 1.7, t60 * 1.9, t60 * 1.2, 0.22, 0.12];
     F.f = f;
     for (let m = 0; m < 7; m++){
       const fr = f * ratios[m];
@@ -280,31 +280,32 @@ class LamieraProc extends AudioWorkletProcessor {
     F.pan = d.pan;
     const e = d.e, v = d.v, hard = d.hard;
     // impulso di contatto del dito: coseno rialzato, piu' corto quando colpisci forte (piu' acuti)
-    const Tc = Math.max(8, Math.round(this.sr * (0.0026 - 0.0019 * hard)));
-    const p = new Float32Array(Tc);
-    for (let k = 0; k < Tc; k++) p[k] = (1 - Math.cos(2 * Math.PI * (k + 0.5) / Tc)) / Tc;   // area = 1
+    // impulso gaussiano (spettro senza buchi): piu' stretto quando colpisci forte
+    const sig = this.sr * (0.00036 - 0.00026 * hard), Tc = Math.max(8, Math.round(sig * 8));
+    const p = new Float32Array(Tc); let area = 0;
+    for (let k = 0; k < Tc; k++){ const u = (k - Tc / 2) / sig; p[k] = Math.exp(-0.5 * u * u); area += p[k]; }
+    for (let k = 0; k < Tc; k++) p[k] /= area;   // area = 1
     // quanto ogni modo "sente" il punto colpito: centro = fondamentale, bordo = ottave e dodicesima
     const gF = 1 - 0.5 * e;
-    const gO = 0.07 + 0.5 * Math.sin(Math.PI / 2 * e);
-    const gT = 0.07 + 0.38 * Math.pow(e, 1.5);
-    const g = [gF, gO * 1.0, gO * 0.8, gT, 0.03 + 0.06 * e, (0.05 + 0.1 * e) * hard, (0.035 + 0.08 * e) * hard];
+    const gO = 0.06 + 0.45 * Math.sin(Math.PI / 2 * e);
+    const gT = 0.1 + 0.45 * Math.pow(e, 1.5);
+    const g = [gF, gO * 1.0, gO * 0.8, gT, 0.05 + 0.08 * e, (0.05 + 0.1 * e) * hard, (0.035 + 0.08 * e) * hard];
     // il contatto non e' un impulso ideale: attenua i modi sopra ~1/Tc
-    const fc = this.sr / Tc;
-    const ratios = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27];
+        const ratios = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27];
     for (let m = 0; m < 7; m++){
-      const x = d.f * ratios[m] / fc, roll = 1 / (1 + Math.pow(x * 0.7, 4));
+      const roll = 1;
       F.eg[m] = v * g[m] * roll * 0.3;
     }
     F.exc = p; F.ei = 0;
     // accoppiamento non lineare: piu' forte il colpo, piu' l'ottava "fiorisce"
-    F.kc = d.bloom; F.kt = d.bloom * 1.3;
+    F.kc = d.bloom; F.kt = d.bloom * 0.6;
     // simpatia: le altre piazzole ricevono un'eco minima del colpo attraverso la lamiera
     for (const G of this.fields){
       if (G === F || !G.pr[0]) continue;
-      let s = 0.004;
+      let s = 0.026;
       for (const a of [1, 2, 3]) for (const b of [1, 2, 3]){
         const c = (d.f * a) / (G.f * b);
-        if (Math.abs(c - 1) < 0.012) s = Math.max(s, 0.025 / (a * b));
+        if (Math.abs(c - 1) < 0.012) s = Math.max(s, 0.06 / (a * b));
       }
       if (!G.exc){ G.exc = p; G.ei = 0; for (let m = 0; m < 7; m++) G.eg[m] = 0; }
       G.eg[0] += v * s * 0.3;
@@ -461,7 +462,8 @@ registerProcessor("lamiera", LamieraProc);
     updateNames();
   }
   // accorda tutte le piazzole nel motore, cosi' risuonano per simpatia gia' dal primo colpo
-  const t60Of = (n, f) => Math.min(16, Math.max(3, 8.5 * Math.pow(196 / f, 0.6))) * (n === 0 ? 1.15 : 1);
+  // fondamentale ~5,5 s a 196 Hz, poco dipendente dall'altezza (misure: 2-6 s); ottava e dodicesima durano ~1,8 volte tanto
+  const t60Of = (n, f) => Math.min(9, Math.max(2.5, 5.5 * Math.pow(196 / f, 0.2))) * (n === 0 ? 1.2 : 1);
   function wkTuneAll(){
     if (!wkNode) return;
     const fs = [], ts = [];
@@ -647,7 +649,7 @@ registerProcessor("lamiera", LamieraProc);
       // risonatori tarati su un handpan vero: T60 della fondamentale ~8 s a 196 Hz, piu' corto sugli acuti
       const t60 = t60Of(n, f) * long;
       const pn = n === 0 ? 0 : (n % 2 ? 1 : -1) * (0.15 + n * 0.05);
-      wkNode.port.postMessage({ type: "strike", n, f, t60, e, v, hard, bloom: 0.00055, pan: pn, noise: 0.05 * v * (0.6 + 0.8 * e) * (0.5 + hard) });
+      wkNode.port.postMessage({ type: "strike", n, f, t60, e, v, hard, bloom: 0.0007, pan: pn, noise: 0.0175 * v * (0.6 + 0.8 * e) * (0.5 + hard) });
       onStrike(n, f, vel, e, fromMidi, v);
       flash(n, t60, v, px, py, e);
       // controllo al primo colpo: se il motore a risonatori resta muto (qualche browser), si torna agli oscillatori
