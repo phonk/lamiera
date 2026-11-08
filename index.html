@@ -20,6 +20,7 @@
   --amber:#E59500;         /* cio' che e' vivo */
   --claret:#840032;        /* cio' che e' pieno e forte */
   --claret-hi:#C23A6A;     /* bordeaux per i tratti sottili */
+  --pink:#E2689B;          /* rosa: il bordo, il ding, cio' che premi */
   --font-mono:"Martian Mono", ui-monospace, "SF Mono", Menlo, monospace;
   --font-body:"Familjen Grotesk", "Helvetica Neue", Arial, sans-serif;
   --mode:1;
@@ -51,7 +52,9 @@ button{font:inherit;color:inherit}
 .field{cursor:pointer}
 .field .shape{fill:rgba(229,218,218,.04);stroke:var(--ink);stroke-width:1;pointer-events:all;transition:fill .6s}
 .field .dimple{fill:rgba(229,218,218,.05);stroke:var(--ink);stroke-width:.5;opacity:.45;pointer-events:none}
-.field.hit .shape{fill:var(--claret);transition:none}
+.field.hit .shape{fill:var(--claret);stroke:var(--pink);stroke-width:1.6;transition:none}
+.field[data-n="0"] .shape{stroke:var(--pink)}
+.field[data-n="0"] .dimple{stroke:var(--pink)}
 .field text{pointer-events:none}
 .note{font-family:var(--font-body);font-weight:500;font-size:17px;fill:var(--amber);letter-spacing:.01em}
 .cents{font-family:var(--font-mono);font-weight:300;font-size:7.5px;fill:var(--ink-dim)}
@@ -87,7 +90,7 @@ h1{margin:0;font-family:var(--font-mono);font-weight:400;font-size:1.05rem;lette
 .mod b{display:grid;place-items:center;width:26px;height:26px;border:1px solid var(--ink-dim);font-family:var(--font-mono);font-weight:400;font-size:.7rem;transition:background .2s,border-color .2s}
 .mod span{font-size:.86rem;color:var(--ink);line-height:1.2;text-align:center;white-space:nowrap}
 .mod[data-kind="toggle"] b{border-style:dashed}
-.mod.on b{background:var(--claret);border-color:var(--claret-hi);border-style:solid}
+.mod.on b{background:var(--pink);border-color:var(--pink);border-style:solid;color:var(--bg)}
 .mod.on span{color:var(--amber)}
 .mod[data-kind="toggle"].on b{background:none;border-color:var(--amber);color:var(--amber)}
 .mod:focus-visible b{outline:1px solid var(--amber);outline-offset:2px}
@@ -325,13 +328,13 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
 
   // colore dalla nota: i gravi verso il verde rame, gli acuti verso l'ottone
   function hueOf(f){ const t = Math.min(1, Math.max(0, Math.log2(f / (F0 * 2)) / 3.2)); return 185 - 150 * t; }
-  function flash(n, dur, amp, px, py){
+  function flash(n, dur, amp, px, py, w){
     const g = fieldsG.querySelector(`[data-n="${n}"]`);
     if (g){ g.classList.add("hit"); clearTimeout(g._t); g._t = setTimeout(() => g.classList.remove("hit"), 160); }
     const p = pos[n]; if (!p) return;
     const now = performance.now() / 1000, h = hueOf(freqOf(n));
     [[0, 1], [0.16, 0.55], [0.45, 0.3]].forEach(([dl, a]) =>
-      waves.push({ x: px ?? p.x, y: py ?? p.y, r0: px == null ? Math.max(p.rx, p.ry) : 4, born: now + dl, dur, amp: amp * a, h, kind: "note" }));
+      waves.push({ x: px ?? p.x, y: py ?? p.y, r0: px == null ? Math.max(p.rx, p.ry) : 4, born: now + dl, dur, amp: amp * a, h, w: Math.min(1, Math.max(0, ((w ?? 0.3) - 0.3) / 0.6)), kind: "note" }));
     glows.push({ p, born: now, dur: dur * 0.35, amp, h });
     if (waves.length > 160) waves.splice(0, waves.length - 160);
   }
@@ -366,14 +369,15 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
         if (a < 0.008) return false;
         const r = reduce ? 186 : 188 * Math.exp(-age / 0.45);
         g2.beginPath(); g2.arc(200, 200, Math.max(1, r), 0, Math.PI * 2);
-        g2.strokeStyle = theme.muted; g2.globalAlpha = a; g2.lineWidth = 1.4; g2.stroke(); g2.globalAlpha = 1;
+        g2.strokeStyle = "#E2689B"; g2.globalAlpha = a; g2.lineWidth = 1.4; g2.stroke(); g2.globalAlpha = 1;
         return true;
       }
       const a = wv.amp * 0.75 * Math.exp(-age * 6.9 / wv.dur);
       if (a < 0.006) return false;
       const r = reduce ? wv.r0 + 6 : wv.r0 + 300 * (1 - Math.exp(-age / 2.2));
       g2.beginPath(); g2.arc(wv.x, wv.y, r, 0, Math.PI * 2);
-      g2.strokeStyle = `rgba(229,149,0,${a})`;
+      // centro della piazzola = ambra, bordo = rosa
+      g2.strokeStyle = `rgba(${Math.round(229 - 3 * wv.w)},${Math.round(149 - 45 * wv.w)},${Math.round(155 * wv.w)},${a})`;
       g2.lineWidth = 0.6 + 1.6 * wv.amp * Math.exp(-age / 1.5);
       g2.stroke();
       return true;
@@ -516,7 +520,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
     const voice = { vg, nodes };
     voices.add(voice);
     setTimeout(() => { voices.delete(voice); try { vg.disconnect(); } catch(e){} }, (dec + 0.6) * 1000);
-    flash(n, dec, v, px, py);
+    flash(n, dec, v, px, py, e);
   }
   // slap: colpo secco sul bordo, mai uguale due volte
   let slapHand = 0, lastSlap = 0;
