@@ -51,7 +51,7 @@ button{font:inherit;color:inherit}
 .field{cursor:pointer}
 .field .shape{fill:rgba(229,218,218,.04);stroke:var(--ink);stroke-width:1;pointer-events:all;transition:fill .6s}
 .field .dimple{fill:rgba(229,218,218,.05);stroke:var(--ink);stroke-width:.5;opacity:.45;pointer-events:none}
-.field.hit .shape{fill:var(--claret);transition:none}
+.field.hit .shape{fill:rgba(229,218,218,.16);transition:none}
 .field text{pointer-events:none}
 .note{font-family:var(--font-body);font-weight:500;font-size:17px;fill:var(--amber);letter-spacing:.01em}
 .cents{font-family:var(--font-mono);font-weight:300;font-size:7.5px;fill:var(--ink-dim)}
@@ -354,7 +354,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
       const { x, y, rx, ry, rot } = gl.p;
       g2.save(); g2.translate(x, y); g2.rotate(rot * Math.PI / 180);
       g2.beginPath(); g2.ellipse(0, 0, rx, ry, 0, 0, Math.PI * 2);
-      g2.fillStyle = `rgba(132,0,50,${Math.min(1, a * 1.4)})`; g2.fill(); g2.restore();
+      g2.fillStyle = `rgba(229,218,218,${Math.min(0.22, a * 0.45)})`; g2.fill(); g2.restore();
       return true;
     });
     // cerchi che si allargano sul pan e si spengono con la coda
