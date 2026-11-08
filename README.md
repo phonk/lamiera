@@ -54,6 +54,20 @@ Laid out like the top row of the keyboard, one group per hand.
 - **brightness**: how much twelfth and metal comes out
 - **reverb**: amount of the long (12 s) reverb
 
+## Record
+
+- **audio** records the output as a stereo 16-bit WAV, keeping the screen awake while it runs; **save .wav** downloads it.
+- **midi** records your strikes. **play** replays them with the current scale, **save .mid** exports a standard MIDI file (120 bpm).
+
+Inside the claude.ai viewer files are offered through its download prompt, packed in a .zip.
+
+## MIDI
+
+Press **enable** and pick the ports (Chrome, Edge or Firefox on desktop; Web MIDI is blocked inside the claude.ai viewer, so use the GitHub Pages version).
+
+- **in**: notes strike the pad closest in pitch, velocity sets the strength; CC64 (sustain) holds the long tail, CC1 (mod wheel) sets the brightness.
+- **out**: every strike sends its note on channel 1, with its velocity.
+
 ## Scales
 
 Each scale is tuned in just intonation on its own ding.

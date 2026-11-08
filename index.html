@@ -105,6 +105,20 @@ h1{margin:0;font-family:var(--font-mono);font-weight:400;font-size:1.05rem;lette
 .q input::-moz-range-thumb{width:3px;height:16px;background:var(--amber);border:0;border-radius:0}
 .q input:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
 
+.recrow{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+.rb{appearance:none;background:none;border:1px solid var(--ink-dim);padding:4px 10px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--font-mono);font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink)}
+.rb i{width:7px;height:7px;border-radius:50%;background:var(--claret-hi)}
+.rb.on{border-color:var(--amber);color:var(--amber)}
+.rb.on i{background:var(--amber);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){.rb.on i{animation:none}}
+.rb:disabled{opacity:.35;cursor:default}
+.rb:focus-visible,.recrow select:focus-visible{outline:1px solid var(--amber);outline-offset:2px}
+.rt{font-family:var(--font-mono);font-size:.7rem;color:var(--amber);min-width:5.5em;font-variant-numeric:tabular-nums}
+.recrow select{background:var(--bg);color:var(--ink);border:1px solid var(--navy);font-family:var(--font-mono);font-size:.68rem;padding:3px 4px;max-width:9.5em}
+.recrow select:disabled{opacity:.4}
+.recmsg{margin:0;min-height:1.2em;font-size:.78rem;color:var(--ink-dim)}
 .notes{margin:0;padding-left:1.4em;font-size:.78rem;color:var(--ink-dim);display:grid;gap:3px}
 .notes li::marker{font-family:var(--font-mono);font-size:.7rem;color:var(--navy)}
 kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
@@ -171,6 +185,28 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
         <label class="q" for="roll"><span class="tag">roll</span><input id="roll" type="range" min="0" max="1" step="0.01" value="0.45"><output id="o-roll"></output></label>
         <label class="q" for="bright"><span class="tag">brightness</span><input id="bright" type="range" min="0" max="1" step="0.01" value="0.55"><output id="o-bright"></output></label>
         <label class="q" for="verb"><span class="tag">reverb</span><input id="verb" type="range" min="0" max="1" step="0.01" value="0.6"><output id="o-verb"></output></label>
+      </div>
+
+      <div class="cell recs">
+        <span class="tag"><b>Record</b></span>
+        <div class="recrow">
+          <button class="rb" id="rec-audio"><i></i>audio</button>
+          <span class="rt" id="rec-audio-t">0:00</span>
+          <button class="rb" id="save-audio" disabled>save .wav</button>
+        </div>
+        <div class="recrow">
+          <button class="rb" id="rec-midi"><i></i>midi</button>
+          <span class="rt" id="rec-midi-t">0 notes</span>
+          <button class="rb" id="play-midi" disabled>play</button>
+          <button class="rb" id="save-midi" disabled>save .mid</button>
+        </div>
+        <div class="recrow">
+          <span class="tag"><b>MIDI</b></span>
+          <button class="rb" id="midi-on">enable</button>
+          <label class="tag" for="midi-in">in</label><select id="midi-in" disabled><option>none</option></select>
+          <label class="tag" for="midi-out">out</label><select id="midi-out" disabled><option>none</option></select>
+        </div>
+        <p class="recmsg" id="rec-msg" aria-live="polite"></p>
       </div>
 
       <div class="cell">
@@ -405,7 +441,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
   requestAnimationFrame(frame);
 
   // ---- audio ----
-  let ctx, bus, shaper, out, noiseBuf, wet, analyser, abuf;
+  let ctx, bus, shaper, out, noiseBuf, wet, analyser, abuf, compOut;
   const verbAmt = () => 0.1 + 0.9 * +$("verb").value;
   const voices = new Set();
   function ensureAudio(){
@@ -421,7 +457,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
     bus.connect(shaper); shaper.connect(lp);
     lp.connect(dry); lp.connect(verb); verb.connect(wet);
     dry.connect(comp); wet.connect(comp); comp.connect(ctx.destination);
-    analyser = ctx.createAnalyser(); analyser.fftSize = 1024; abuf = new Float32Array(analyser.fftSize); comp.connect(analyser);
+    analyser = ctx.createAnalyser(); analyser.fftSize = 1024; abuf = new Float32Array(analyser.fftSize); comp.connect(analyser); compOut = comp;
     noiseBuf = ctx.createBuffer(1, ctx.sampleRate * 1.5, ctx.sampleRate);
     const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
     applyGrit();
@@ -446,7 +482,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
   }
 
   // where: 0 = centro della piazzola (fondamentale piena), 1 = bordo (piu' ottava, dodicesima e metallo)
-  function strike(n, vel, where, px, py){
+  function strike(n, vel, where, px, py, fromMidi){
     ensureAudio();
     const e = where ?? (0.22 + Math.random() * 0.18);
     const t = ctx.currentTime + 0.005, f = freqOf(n);
@@ -516,6 +552,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
     const voice = { vg, nodes };
     voices.add(voice);
     setTimeout(() => { voices.delete(voice); try { vg.disconnect(); } catch(e){} }, (dec + 0.6) * 1000);
+    onStrike(n, f, vel, e, fromMidi, v);
     flash(n, dec, v, px, py);
   }
   // slap: colpo secco sul bordo, mai uguale due volte
@@ -702,6 +739,184 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
     b.addEventListener("pointerup", () => modUp(k));
     b.addEventListener("pointerleave", () => modUp(k));
     b.addEventListener("click", e => { if (e.detail === 0){ modDown(k); setTimeout(() => modUp(k), 200); } });
+  });
+
+  // ================= recorder, registratore MIDI, MIDI in/out =================
+  const fmtT = s => Math.floor(s / 60) + ":" + String(Math.floor(s % 60)).padStart(2, "0");
+  const midiOf = f => Math.round(69 + 12 * Math.log2(f / 440));
+  const msg = t => { $("rec-msg").textContent = t; };
+
+  // ---- salvataggio: nel viewer di claude.ai passa dal capability downloads (wav e mid dentro uno zip), altrove scarica diretto ----
+  const CRC = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+  function crc32(u8){ let c = 0xFFFFFFFF; for (let i = 0; i < u8.length; i++) c = CRC[(c ^ u8[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+  function zipOne(name, u8){
+    const nm = new TextEncoder().encode(name), crc = crc32(u8), sz = u8.length;
+    const lh = new DataView(new ArrayBuffer(30)); lh.setUint32(0, 0x04034b50, true); lh.setUint16(4, 20, true);
+    lh.setUint32(14, crc, true); lh.setUint32(18, sz, true); lh.setUint32(22, sz, true); lh.setUint16(26, nm.length, true);
+    const ch = new DataView(new ArrayBuffer(46)); ch.setUint32(0, 0x02014b50, true); ch.setUint16(4, 20, true); ch.setUint16(6, 20, true);
+    ch.setUint32(16, crc, true); ch.setUint32(20, sz, true); ch.setUint32(24, sz, true); ch.setUint16(28, nm.length, true);
+    const cdOff = 30 + nm.length + sz, cdSize = 46 + nm.length;
+    const end = new DataView(new ArrayBuffer(22)); end.setUint32(0, 0x06054b50, true); end.setUint16(8, 1, true); end.setUint16(10, 1, true);
+    end.setUint32(12, cdSize, true); end.setUint32(16, cdOff, true);
+    return new Blob([lh, nm, u8, ch, nm, end], { type: "application/zip" });
+  }
+  async function saveFile(name, u8){
+    const host = window.claude && typeof window.claude.use === "function";
+    if (host){
+      const dl = await window.claude.use("downloads");
+      if (!dl){ msg("Saving is not available in this view. Open phonk.github.io/lamiera to save files."); return; }
+      try { await dl.save({ filename: name.replace(/\.\w+$/, ".zip"), data: zipOne(name, u8) }); msg("Saved " + name + " (in a zip)."); }
+      catch (e){ msg(e && e.code === "declined" ? "Save cancelled." : "Could not save: " + ((e && e.message) || "unavailable") + "."); }
+      return;
+    }
+    const url = URL.createObjectURL(new Blob([u8]));
+    const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    msg("Saved " + name + ".");
+  }
+  const stamp = () => { const d = new Date(), p = x => String(x).padStart(2, "0"); return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}`; };
+
+  // ---- recorder audio: cattura l'uscita in WAV stereo 16 bit ----
+  const arec = { on: false, chunksL: [], chunksR: [], len: 0, node: null, t0: 0, wav: null, lock: null, timer: 0 };
+  function startAudioRec(){
+    ensureAudio();
+    arec.chunksL = []; arec.chunksR = []; arec.len = 0; arec.wav = null;
+    const sp = ctx.createScriptProcessor(4096, 2, 2), mute = ctx.createGain(); mute.gain.value = 0;
+    sp.onaudioprocess = ev => {
+      if (!arec.on) return;
+      const l = ev.inputBuffer.getChannelData(0), r = ev.inputBuffer.numberOfChannels > 1 ? ev.inputBuffer.getChannelData(1) : l;
+      arec.chunksL.push(new Float32Array(l)); arec.chunksR.push(new Float32Array(r)); arec.len += l.length;
+    };
+    recTap.connect(sp); sp.connect(mute); mute.connect(ctx.destination);
+    arec.node = { sp, mute }; arec.on = true; arec.t0 = performance.now();
+    try { navigator.wakeLock && navigator.wakeLock.request("screen").then(l => { arec.lock = l; }, () => {}); } catch (e){}
+    $("rec-audio").classList.add("on"); $("save-audio").disabled = true; msg("");
+    arec.timer = setInterval(() => { $("rec-audio-t").textContent = fmtT((performance.now() - arec.t0) / 1000); }, 250);
+  }
+  function stopAudioRec(){
+    arec.on = false; clearInterval(arec.timer);
+    try { recTap.disconnect(arec.node.sp); arec.node.sp.disconnect(); arec.node.mute.disconnect(); } catch (e){}
+    try { arec.lock && arec.lock.release(); } catch (e){} arec.lock = null;
+    $("rec-audio").classList.remove("on");
+    if (!arec.len){ $("rec-audio-t").textContent = "0:00"; return; }
+    const n = arec.len, sr = ctx.sampleRate, buf = new ArrayBuffer(44 + n * 4), dv = new DataView(buf);
+    const W = (o, s) => { for (let i = 0; i < s.length; i++) dv.setUint8(o + i, s.charCodeAt(i)); };
+    W(0, "RIFF"); dv.setUint32(4, 36 + n * 4, true); W(8, "WAVE"); W(12, "fmt "); dv.setUint32(16, 16, true);
+    dv.setUint16(20, 1, true); dv.setUint16(22, 2, true); dv.setUint32(24, sr, true); dv.setUint32(28, sr * 4, true);
+    dv.setUint16(32, 4, true); dv.setUint16(34, 16, true); W(36, "data"); dv.setUint32(40, n * 4, true);
+    let o = 44;
+    for (let c = 0; c < arec.chunksL.length; c++){
+      const L = arec.chunksL[c], R = arec.chunksR[c];
+      for (let i = 0; i < L.length; i++){
+        const l = Math.max(-1, Math.min(1, L[i])), r = Math.max(-1, Math.min(1, R[i]));
+        dv.setInt16(o, l < 0 ? l * 0x8000 : l * 0x7FFF, true); dv.setInt16(o + 2, r < 0 ? r * 0x8000 : r * 0x7FFF, true); o += 4;
+      }
+    }
+    arec.chunksL = []; arec.chunksR = [];
+    arec.wav = new Uint8Array(buf);
+    $("save-audio").disabled = false;
+    $("rec-audio-t").textContent = fmtT(n / sr);
+  }
+  let recTap = null;
+  $("rec-audio").addEventListener("click", () => { ensureAudio(); if (!recTap){ recTap = ctx.createGain(); compOut.connect(recTap); } arec.on ? stopAudioRec() : startAudioRec(); });
+  $("save-audio").addEventListener("click", () => { if (arec.wav) saveFile("lamiera-" + stamp() + ".wav", arec.wav); });
+
+  // ---- registratore MIDI: registra i colpi (piazzola, forza, punto), li risuona e li esporta in .mid ----
+  const mrec = { on: false, playing: false, t0: 0, events: [], timers: [] };
+  function onStrike(n, f, vRaw, where, fromMidi, vOut){
+    const note = midiOf(f), vel = Math.max(1, Math.min(127, Math.round(vOut * 110)));
+    if (mrec.on && !mrec.playing){
+      mrec.events.push({ t: performance.now() - mrec.t0, n, v: vRaw, where, note, vel, oct: octave() });
+      $("rec-midi-t").textContent = mrec.events.length + (mrec.events.length === 1 ? " note" : " notes");
+    }
+    if (!fromMidi) midiSend(note, vel);
+  }
+  function setMidiButtons(){
+    const has = mrec.events.length > 0 && !mrec.on;
+    $("play-midi").disabled = !has; $("save-midi").disabled = !has;
+    $("rec-midi").classList.toggle("on", mrec.on); $("play-midi").classList.toggle("on", mrec.playing);
+    $("play-midi").textContent = mrec.playing ? "stop" : "play";
+  }
+  $("rec-midi").addEventListener("click", () => {
+    ensureAudio();
+    if (mrec.playing) stopPlay();
+    if (mrec.on){ mrec.on = false; }
+    else { mrec.on = true; mrec.events = []; mrec.t0 = performance.now(); $("rec-midi-t").textContent = "0 notes"; msg(""); }
+    setMidiButtons();
+  });
+  function stopPlay(){ mrec.timers.forEach(clearTimeout); mrec.timers = []; mrec.playing = false; setMidiButtons(); }
+  $("play-midi").addEventListener("click", () => {
+    if (mrec.playing){ stopPlay(); return; }
+    ensureAudio(); mrec.playing = true; setMidiButtons();
+    mrec.events.forEach(e => mrec.timers.push(setTimeout(() => {
+      // risuona con la scala corrente e l'ottava registrata
+      const hq = state.mods.has("q"), hu = state.mods.has("u");
+      state.mods.delete("q"); state.mods.delete("u");
+      if (e.oct < 1) state.mods.add("q"); if (e.oct > 1) state.mods.add("u");
+      strike(e.n, e.v, e.where);
+      state.mods.delete("q"); state.mods.delete("u");
+      if (hq) state.mods.add("q"); if (hu) state.mods.add("u");
+    }, e.t)));
+    const last = mrec.events.length ? mrec.events[mrec.events.length - 1].t : 0;
+    mrec.timers.push(setTimeout(stopPlay, last + 400));
+  });
+  $("save-midi").addEventListener("click", () => {
+    const ev = [];
+    mrec.events.forEach(e => { const tk = Math.round(e.t * 960 / 500); ev.push([tk, 0x90, e.note, e.vel], [tk + 240, 0x80, e.note, 0]); });
+    ev.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const bytes = [], vlq = x => { const s = [x & 127]; while ((x >>= 7)) s.unshift((x & 127) | 128); bytes.push(...s); };
+    bytes.push(0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20);             // 120 bpm
+    let last = 0; ev.forEach(([tk, st, a, b]) => { vlq(tk - last); last = tk; bytes.push(st, a, b); });
+    bytes.push(0x00, 0xFF, 0x2F, 0x00);
+    const head = [0x4D,0x54,0x68,0x64, 0,0,0,6, 0,0, 0,1, 0x03,0xC0];   // formato 0, 960 tick per nota
+    const L = bytes.length, trk = [0x4D,0x54,0x72,0x6B, (L >>> 24) & 255, (L >>> 16) & 255, (L >>> 8) & 255, L & 255];
+    saveFile("lamiera-" + stamp() + ".mid", new Uint8Array([...head, ...trk, ...bytes]));
+  });
+
+  // ---- MIDI in / out (Web MIDI) ----
+  let midiAcc = null, midiOut = null;
+  function midiSend(note, vel){
+    if (!midiOut) return;
+    try { midiOut.send([0x90, note, vel]); midiOut.send([0x80, note, 0], performance.now() + 300); } catch (e){}
+  }
+  function fillSelect(sel, ports, cur){
+    sel.innerHTML = "";
+    const none = document.createElement("option"); none.value = ""; none.textContent = "none"; sel.appendChild(none);
+    ports.forEach(p => { const o = document.createElement("option"); o.value = p.id; o.textContent = p.name; sel.appendChild(o); });
+    sel.value = cur || "";
+  }
+  function refreshPorts(){
+    if (!midiAcc) return;
+    fillSelect($("midi-in"), [...midiAcc.inputs.values()], $("midi-in").value);
+    fillSelect($("midi-out"), [...midiAcc.outputs.values()], $("midi-out").value);
+  }
+  function padForNote(note){
+    let best = 0, bd = Infinity;
+    for (let n = 0; n <= 9; n++){ const d = Math.abs(midiOf(freqOf(n)) - note); if (d < bd){ bd = d; best = n; } }
+    return best;
+  }
+  function onMidi(e){
+    const [st, a, b] = e.data, t = st & 0xF0;
+    if (t === 0x90 && b > 0){ const n = padForNote(a); strike(n, 0.15 + b / 127 * 0.9, 0.3, undefined, undefined, true); }
+    else if (t === 0xB0 && a === 64){ b >= 64 ? state.mods.add("i") : state.mods.delete("i"); $("m-i").classList.toggle("on", b >= 64); }
+    else if (t === 0xB0 && a === 1){ bright.value = (b / 127).toFixed(2); bright.dispatchEvent(new Event("input")); }
+  }
+  $("midi-in").addEventListener("change", () => {
+    if (!midiAcc) return;
+    midiAcc.inputs.forEach(p => { p.onmidimessage = null; });
+    const p = midiAcc.inputs.get($("midi-in").value); if (p) p.onmidimessage = onMidi;
+  });
+  $("midi-out").addEventListener("change", () => { midiOut = midiAcc ? midiAcc.outputs.get($("midi-out").value) || null : null; });
+  $("midi-on").addEventListener("click", async () => {
+    if (!navigator.requestMIDIAccess){ msg("This browser has no Web MIDI (Chrome, Edge and Firefox on desktop have it)."); return; }
+    try {
+      midiAcc = await navigator.requestMIDIAccess();
+      midiAcc.onstatechange = refreshPorts; refreshPorts();
+      $("midi-in").disabled = false; $("midi-out").disabled = false; $("midi-on").classList.add("on"); $("midi-on").textContent = "on";
+      msg(midiAcc.inputs.size + midiAcc.outputs.size ? "" : "MIDI is on, but no devices are connected yet.");
+    } catch (e){
+      msg("MIDI is blocked here. It works on phonk.github.io/lamiera.");
+    }
   });
 
   const scBox = $("scales");
