@@ -4,11 +4,13 @@
 
 A handpan you play in the browser, with the computer keyboard or by touch. One HTML file, no dependencies, no install.
 
+**▶ Play it: [phonk.github.io/lamiera](https://phonk.github.io/lamiera/)**
+
 ![lamiera](screenshot.png)
 
 ## Play
 
-Open `index.html` in a browser, or the GitHub Pages version of this repo. Press any key or tap the pan to wake up the audio.
+Open [phonk.github.io/lamiera](https://phonk.github.io/lamiera/), or `index.html` in any browser. Press any key or tap the pan to wake up the audio.
 
 ### Keyboard
 
