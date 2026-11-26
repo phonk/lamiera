@@ -210,6 +210,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
 
       <div class="cell quotes">
         <label class="q" for="dyn"><span class="tag">dynamics</span><input id="dyn" type="range" min="0" max="1" step="0.01" value="0.65"><output id="o-dyn"></output></label>
+        <label class="q" for="perc"><span class="tag">percussion</span><input id="perc" type="range" min="0" max="1" step="0.01" value="0.25"><output id="o-perc"></output></label>
         <label class="q" for="roll"><span class="tag">roll</span><input id="roll" type="range" min="0" max="1" step="0.01" value="0.45"><output id="o-roll"></output></label>
         <label class="q" for="bright"><span class="tag">brightness</span><input id="bright" type="range" min="0" max="1" step="0.01" value="0.55"><output id="o-bright"></output></label>
         <label class="q" for="verb"><span class="tag">reverb</span><input id="verb" type="range" min="0" max="1" step="0.01" value="0.6"><output id="o-verb"></output></label>
@@ -244,6 +245,7 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
           <li>On each pad the amber name is the note, the small box is its key.</li>
           <li>Centre of a pad: full fundamental. Towards the edge: octave and twelfth. From the computer, the row below (<kbd>Z X C V B N M , .</kbd>, the dashed box) strikes the same tone on the edge.</li>
           <li><kbd>Shift</kbd> + key for an accent. On touch, the more finger you press down, the harder the strike.</li>
+          <li><b>percussion</b> goes from sweet to percussive: a sharper finger, the steel shell ringing on impact, a low thump of the air inside. Turned up past a third, a key or a finger held on a pad mutes it, like resting your finger on a real handpan.</li>
           <li>The whole surface plays: just outside a pad you hit its edge; further away the note fades into a knock on the steel.</li>
         </ol>
       </div>
@@ -252,9 +254,13 @@ kbd{font-family:var(--font-mono);font-size:.9em;color:var(--ink)}
 </div>
 
 <script type="text/plain" id="lamiera-worklet">
-// Lamiera: banco di risonatori modali, uno per piazzola, tarato su registrazioni di un handpan vero.
+// Lamiera: banco di risonatori modali, uno per piazzola, tarato su registrazioni di handpan veri.
 // Ogni modo e' un risonatore complesso z = p*z + x (risposta all'impulso = sinusoide che decade, ampiezza = ingresso).
 // L'ottava e la dodicesima ricevono anche energia dalla fondamentale per accoppiamento non lineare (la "fioritura").
+// Doppio decadimento: fondamentale e ottava hanno anche una copia che si spegne in fretta (il "colpo" che stacca dalla nota),
+// come nei metalli veri, dove subito dopo l'impatto parte dell'energia se ne va e poi resta una coda lenta.
+const RATIOS = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27, 1.0004, 1.999, 8.31, 11.42];
+const NM = RATIOS.length;
 class LamieraProc extends AudioWorkletProcessor {
   constructor(){
     super();
@@ -262,21 +268,27 @@ class LamieraProc extends AudioWorkletProcessor {
     this.fields = [];
     for (let i = 0; i < 10; i++) this.fields.push(this.makeField(i));
     this.noise = { a: 0, tau: 0, lp: 0, k: 0, s: 0, pan: 0 };
-    this.damp = 0;
+    // la cassa d'aria del pan: un tonfo grave quando colpisci con decisione
+    this.cav = { re: 0, im: 0, pr: 0, pi: 0, exc: null, ei: 0, g: 0 };
+    // il guscio d'acciaio: tre modi acuti fissi, uguali per ogni nota, che squillano un attimo all'impatto (il "tink")
+    this.shell = [3120, 4730, 6890, 9310].map((f, i) => {
+      const r = Math.exp(-6.9078 / ([0.09, 0.07, 0.05, 0.035][i] * sampleRate)), w = 2 * Math.PI * f / sampleRate;
+      return { re: 0, im: 0, pr: r * Math.cos(w), pi: r * Math.sin(w), g: [1, 0.8, 0.6, 0.4][i] };
+    });
+    this.shellExc = null; this.shellEi = 0; this.shellG = 0; this.shellPan = 0;
     this.port.onmessage = e => this.msg(e.data);
   }
   makeField(i){
-    // modi: 0 fondamentale, 1-2 le due ottave (lievemente separate: battimento), 3 dodicesima, 4 quarta armonica, 5-6 lamiera
-    const n = 7;
-    return { i, f: 220, pan: 0, re: new Float64Array(n), im: new Float64Array(n), pr: new Float64Array(n), pi: new Float64Array(n),
-      exc: null, ei: 0, eg: new Float64Array(n), kc: 0, kt: 0 };
+    // modi: 0 fondamentale, 1-2 ottave separate (battimento), 3 dodicesima, 4 quarta armonica, 5-6 lamiera,
+    // 7-8 copie veloci di fondamentale e ottava (il colpo), 9-10 lamiera acuta (il "tak")
+    return { i, f: 220, pan: 0, re: new Float64Array(NM), im: new Float64Array(NM), pr: new Float64Array(NM), pi: new Float64Array(NM),
+      exc: null, ei: 0, eg: new Float64Array(NM), kc: 0, kt: 0, t60: 5 };
   }
   tune(F, f, t60, dampFast){
-    const ratios = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27];
-    const t60s = [t60, t60 * 1.8, t60 * 1.7, t60 * 1.9, t60 * 1.2, 0.22, 0.12];
-    F.f = f;
-    for (let m = 0; m < 7; m++){
-      const fr = f * ratios[m];
+    const t60s = [t60, t60 * 1.8, t60 * 1.7, t60 * 1.9, t60 * 1.2, 0.22, 0.12, 0.32, 0.26, 0.05, 0.035];
+    F.f = f; if (!dampFast) F.t60 = t60;
+    for (let m = 0; m < NM; m++){
+      const fr = f * RATIOS[m];
       if (fr > this.sr * 0.45){ F.pr[m] = 0; F.pi[m] = 0; F.re[m] = 0; F.im[m] = 0; continue; }
       const T = dampFast ? Math.min(0.25, t60s[m]) : t60s[m];
       const r = Math.exp(-6.9078 / (T * this.sr)), w = 2 * Math.PI * fr / this.sr;
@@ -286,30 +298,35 @@ class LamieraProc extends AudioWorkletProcessor {
   msg(d){
     if (d.type === "strike") this.strike(d);
     else if (d.type === "damp"){ for (const F of this.fields) this.tune(F, F.f, 1, true); }
+    else if (d.type === "choke"){
+      // il dito resta sulla piazzola: la nota si spegne in fretta, quanto piu' e' percussivo
+      const F = this.fields[d.n]; if (F && F.pr[0]) this.tune(F, F.f, 0.1 + 0.5 * (1 - d.amt), true);
+    }
     else if (d.type === "tuneAll"){ d.f.forEach((f, i) => { const F = this.fields[i]; if (F.re[0] * F.re[0] + F.im[0] * F.im[0] > 1e-8) return; this.tune(F, f, d.t60[i], false); }); }
+  }
+  pulse(sig){
+    const Tc = Math.max(8, Math.round(sig * 8)), p = new Float32Array(Tc); let area = 0;
+    for (let k = 0; k < Tc; k++){ const u = (k - Tc / 2) / sig; p[k] = Math.exp(-0.5 * u * u); area += p[k]; }
+    for (let k = 0; k < Tc; k++) p[k] /= area;   // area = 1
+    return p;
   }
   strike(d){
     const F = this.fields[d.n];
     this.tune(F, d.f, d.t60, false);
     F.pan = d.pan;
-    const e = d.e, v = d.v, hard = d.hard;
-    // impulso di contatto del dito: coseno rialzato, piu' corto quando colpisci forte (piu' acuti)
-    // impulso gaussiano (spettro senza buchi): piu' stretto quando colpisci forte
-    const sig = this.sr * (0.00036 - 0.00026 * hard), Tc = Math.max(8, Math.round(sig * 8));
-    const p = new Float32Array(Tc); let area = 0;
-    for (let k = 0; k < Tc; k++){ const u = (k - Tc / 2) / sig; p[k] = Math.exp(-0.5 * u * u); area += p[k]; }
-    for (let k = 0; k < Tc; k++) p[k] /= area;   // area = 1
+    const e = d.e, v = d.v, hard = d.hard, pc = d.perc || 0;
+    // impulso gaussiano del dito (spettro senza buchi): piu' stretto quando colpisci forte o percussivo
+    const p = this.pulse(this.sr * (0.00036 - 0.00026 * hard) * (1 - 0.6 * pc));
     // quanto ogni modo "sente" il punto colpito: centro = fondamentale, bordo = ottave e dodicesima
     const gF = 1 - 0.5 * e;
-    const gO = 0.06 + 0.45 * Math.sin(Math.PI / 2 * e);
-    const gT = 0.1 + 0.45 * Math.pow(e, 1.5);
-    const g = [gF, gO * 1.0, gO * 0.8, gT, 0.05 + 0.08 * e, (0.05 + 0.1 * e) * hard, (0.035 + 0.08 * e) * hard];
-    // il contatto non e' un impulso ideale: attenua i modi sopra ~1/Tc
-        const ratios = [1, 1.992, 2.006, 2.998, 3.99, 4.71, 6.27];
-    for (let m = 0; m < 7; m++){
-      const roll = 1;
-      F.eg[m] = v * g[m] * roll * 0.3;
-    }
+    const gO = (0.06 + 0.45 * Math.sin(Math.PI / 2 * e)) * (1 + 1.2 * pc);
+    const gT = (0.1 + 0.45 * Math.pow(e, 1.5)) * (1 + 1.6 * pc);
+    const sh = 0.5 * hard + 0.5;
+    const g = [gF, gO * 1.0, gO * 0.8, gT, (0.05 + 0.08 * e) * (1 + 2 * pc),
+      (0.05 + 0.1 * e) * sh * (1 + 5 * pc), (0.035 + 0.08 * e) * sh * (1 + 5 * pc),
+      gF * (0.9 + 2.6 * pc), gO * (1.2 + 3 * pc),
+      (0.02 + 0.05 * e) * (0.15 + 3.5 * pc) * sh, (0.015 + 0.04 * e) * (0.1 + 3.5 * pc) * sh];
+    for (let m = 0; m < NM; m++) F.eg[m] = v * g[m] * 0.3;
     F.exc = p; F.ei = 0;
     // accoppiamento non lineare: piu' forte il colpo, piu' l'ottava "fiorisce"
     F.kc = d.bloom; F.kt = d.bloom * 0.6;
@@ -321,17 +338,30 @@ class LamieraProc extends AudioWorkletProcessor {
         const c = (d.f * a) / (G.f * b);
         if (Math.abs(c - 1) < 0.012) s = Math.max(s, 0.06 / (a * b));
       }
-      if (!G.exc){ G.exc = p; G.ei = 0; for (let m = 0; m < 7; m++) G.eg[m] = 0; }
+      if (!G.exc){ G.exc = p; G.ei = 0; for (let m = 0; m < NM; m++) G.eg[m] = 0; }
       G.eg[0] += v * s * 0.3;
       G.eg[1] += v * s * 0.15;
     }
+    // tonfo della cassa d'aria: piu' forte al centro e sul ding, solo quando suoni percussivo
+    const C = this.cav;
+    if (pc > 0.02 && d.cav){
+      const r = Math.exp(-6.9078 / (0.38 * this.sr)), w = 2 * Math.PI * d.cav / this.sr;
+      C.pr = r * Math.cos(w); C.pi = r * Math.sin(w);
+      C.exc = this.pulse(this.sr * 0.0016); C.ei = 0;
+      C.g = v * pc * pc * (1 - 0.6 * e) * (d.n === 0 ? 1.6 : 1) * 0.25;
+    }
+    // squillo del guscio: cresce con la percussione, la forza e verso il bordo
+    this.shellExc = this.pulse(this.sr * (0.00009 - 0.00004 * pc)); this.shellEi = 0; this.shellPan = d.pan;
+    this.shellG = v * (0.012 + 0.3 * Math.pow(pc, 1.5)) * (0.4 + 0.6 * hard) * (0.6 + 0.8 * e);
     // rumore del polpastrello, diretto in uscita
     const N = this.noise;
-    N.a = d.noise; N.tau = Math.exp(-1 / (0.011 * this.sr)); N.k = Math.exp(-2 * Math.PI * Math.min(9000, 1500 + 7000 * hard + 2000 * e) / this.sr); N.pan = d.pan;
+    N.a = d.noise * (1 + 5 * pc);
+    N.tau = Math.exp(-1 / ((0.011 - 0.005 * pc) * this.sr));
+    N.k = Math.exp(-2 * Math.PI * Math.min(11000, 1500 + 7000 * hard + 2000 * e + 3500 * pc) / this.sr); N.pan = d.pan;
   }
   process(_, outputs){
     const out = outputs[0], L = out[0], R = out[1] || out[0], n = L.length;
-    const fs = this.fields, N = this.noise;
+    const fs = this.fields, N = this.noise, C = this.cav;
     for (let s = 0; s < n; s++){
       let l = 0, r = 0;
       for (let fi = 0; fi < 10; fi++){
@@ -342,7 +372,7 @@ class LamieraProc extends AudioWorkletProcessor {
         if (F.exc){ x = F.exc[F.ei++]; if (F.ei >= F.exc.length){ F.exc = null; } }
         const yF = im[0], yO = im[1] + im[2];
         let sum = 0;
-        for (let m = 0; m < 7; m++){
+        for (let m = 0; m < NM; m++){
           if (!pr[m] && !pi[m]) continue;
           let inp = x * F.eg[m];
           if (m === 1 || m === 2) inp += F.kc * yF * yF;
@@ -354,6 +384,21 @@ class LamieraProc extends AudioWorkletProcessor {
         }
         const pl = 0.5 - F.pan * 0.5, prr = 0.5 + F.pan * 0.5;
         l += sum * pl; r += sum * prr;
+      }
+      if (C.pr){
+        let x = 0; if (C.exc){ x = C.exc[C.ei++] * C.g; if (C.ei >= C.exc.length) C.exc = null; }
+        const a = C.re, b = C.im;
+        C.re = C.pr * a - C.pi * b + x; C.im = C.pr * b + C.pi * a;
+        l += C.im * 0.5; r += C.im * 0.5;
+      }
+      {
+        let x = 0; if (this.shellExc){ x = this.shellExc[this.shellEi++] * this.shellG; if (this.shellEi >= this.shellExc.length) this.shellExc = null; }
+        let sv = 0;
+        for (const M of this.shell){
+          const a = M.re, b = M.im;
+          M.re = M.pr * a - M.pi * b + x * M.g; M.im = M.pr * b + M.pi * a; sv += M.im;
+        }
+        if (sv !== 0){ l += sv * (0.5 - this.shellPan * 0.4); r += sv * (0.5 + this.shellPan * 0.4); }
       }
       if (N.a > 1e-5){
         N.lp = N.k * N.lp + (1 - N.k) * (Math.random() * 2 - 1);
@@ -661,9 +706,12 @@ registerProcessor("lamiera", LamieraProc);
     const soft = 1 - Math.min(1, vel);          // colpo morbido = attacco piu' lento e meno metallo
     if (wkNode){
       // risonatori tarati su un handpan vero: T60 della fondamentale ~8 s a 196 Hz, piu' corto sugli acuti
-      const t60 = t60Of(n, f) * long;
+      // percussione: il cursore, piu' un po' di slancio per i colpi forti (accento, dito pieno)
+      const pc = Math.min(1, Math.max(0, +$("perc").value + 0.35 * (Math.min(1.1, vel) - 0.75)));
+      const t60 = t60Of(n, f) * long * (1 - 0.3 * pc);
       const pn = n === 0 ? 0 : (n % 2 ? 1 : -1) * (0.15 + n * 0.05);
-      wkNode.port.postMessage({ type: "strike", n, f, t60, e, v, hard, bloom: 0.0007, pan: pn, noise: 0.0175 * v * (0.6 + 0.8 * e) * (0.5 + hard) });
+      const cav = Math.min(115, Math.max(75, freqOf(0) * 0.62));
+      wkNode.port.postMessage({ type: "strike", n, f, t60, e, v, hard, bloom: 0.0007, pan: pn, noise: 0.0175 * v * (0.6 + 0.8 * e) * (0.5 + hard), perc: pc, cav });
       onStrike(n, f, vel, e, fromMidi, v);
       flash(n, t60, v, px, py, e);
       // controllo al primo colpo: se il motore a risonatori resta muto (qualche browser), si torna agli oscillatori
@@ -852,13 +900,24 @@ registerProcessor("lamiera", LamieraProc);
     if (k === "q" || k === "u") updateNames();
   }
 
+  // ---- dito che resta sulla piazzola: con la percussione alta la nota si smorza, come su un handpan vero ----
+  const pressTok = new Map(); let tokN = 0;
+  function holdChoke(id, n){
+    const tok = ++tokN; pressTok.set(id, tok);
+    setTimeout(() => {
+      if (pressTok.get(id) !== tok || !state.held.has(id) || state.mods.has("e")) return;
+      const amt = Math.min(1, Math.max(0, (+$("perc").value - 0.3) / 0.7));
+      if (amt > 0 && wkNode) wkNode.port.postMessage({ type: "choke", n, amt });
+    }, 150);
+  }
+
   // ---- tastiera ----
   window.addEventListener("keydown", e => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
     const k = e.code === "Semicolon" ? "ò" : e.key.toLowerCase();
     if (e.target.tagName === "INPUT" && !(k in KEYS) && !"qweruiop".includes(k)) return;
-    if (e.code in EDGE){ e.preventDefault(); if (e.repeat) return; state.held.set("e" + e.code, EDGE[e.code]); strike(EDGE[e.code], keyVel(e), 0.85 + Math.random() * 0.15); return; }
-    if (k in KEYS){ e.preventDefault(); if (e.repeat) return; state.held.set("k" + k, KEYS[k]); strike(KEYS[k], keyVel(e)); }
+    if (e.code in EDGE){ e.preventDefault(); if (e.repeat) return; state.held.set("e" + e.code, EDGE[e.code]); strike(EDGE[e.code], keyVel(e), 0.85 + Math.random() * 0.15); holdChoke("e" + e.code, EDGE[e.code]); return; }
+    if (k in KEYS){ e.preventDefault(); if (e.repeat) return; state.held.set("k" + k, KEYS[k]); strike(KEYS[k], keyVel(e)); holdChoke("k" + k, KEYS[k]); }
     else if (k.length === 1 && "qweruiop".includes(k)){ e.preventDefault(); if (e.repeat) return; modDown(k); }
   });
   window.addEventListener("keyup", e => {
@@ -890,6 +949,7 @@ registerProcessor("lamiera", LamieraProc);
   function playAt(ev, n, d, q){
     state.held.set("p" + ev.pointerId, n);
     strike(n, touchVel(ev), Math.min(1, d), q.x, q.y);
+    holdChoke("p" + ev.pointerId, n);
   }
   fieldsG.addEventListener("pointerdown", ev => {
     const g = ev.target.closest(".field"); if (!g) return;
@@ -1114,7 +1174,7 @@ registerProcessor("lamiera", LamieraProc);
     scBox.appendChild(b);
   });
 
-  ["dyn","roll","bright","verb"].forEach(id => { const i = $(id), o = $("o-" + id);
+  ["dyn","perc","roll","bright","verb"].forEach(id => { const i = $(id), o = $("o-" + id);
     const show = () => { o.textContent = (+i.value).toFixed(2); }; i.addEventListener("input", show); show(); });
   $("verb").addEventListener("input", () => { if (wet) wet.gain.setTargetAtTime(verbAmt(), ctx.currentTime, 0.05); });
 

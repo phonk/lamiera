@@ -50,6 +50,7 @@ Laid out like the top row of the keyboard, one group per hand.
 ### Controls
 
 - **dynamics**: base strike strength for keyboard and mouse
+- **percussion**: from sweet to percussive. Turned up, the finger is sharper, the steel shell rings on impact and the air inside thumps; past a third, a key or finger held on a pad mutes the note, as when you rest your finger on a real handpan. Harder strikes are a little more percussive on their own.
 - **roll**: density of the roll
 - **brightness**: how much twelfth and metal comes out
 - **reverb**: amount of the long (12 s) reverb
@@ -103,6 +104,8 @@ Each strike runs through a **modal resonator bank** in an AudioWorklet: one set 
 
 Sources: [luntal/HandPan](https://github.com/luntal/HandPan) (Apache-2.0), [arash-mohtat/hangdrum_py](https://github.com/arash-mohtat/hangdrum_py) (CC0, finger and mallet recordings), [jakobabesser/hang-buddy](https://github.com/jakobabesser/hang-buddy), [wutlu/hang](https://github.com/wutlu/hang) (GPL-3.0), [musicHK/air-handpan](https://github.com/musicHK/air-handpan). The recordings were only measured; none of them is included here.
 
+- **Double decay.** Right after the impact a real pan sheds part of its energy fast, then settles into a long tail: in the recordings the strike stands 10–12 dB above the note half a second later. Lamiera gives the fundamental and the octave a fast-decaying twin (T60 0.3 s) next to the slow mode, so the strike stands out by about 11 dB at the default setting.
+- **Percussion.** A shorter contact pulse, four fixed modes of the steel shell (3.1–9.3 kHz) excited by a sharp impulse, louder upper modes, and a low cavity resonance. Measured on the attack: high frequencies go from −38 dB (like the finger recordings, −37 dB) to −27 dB (like the mallet recordings, −26 dB).
 - **Bloom.** The octave and twelfth are not only struck directly: they are driven by the square of the fundamental (and by fundamental × octave), a quadratic coupling like the one in the steel shell. Energy flows from the fundamental into the octave over the first few hundred milliseconds, more on harder strikes.
 - **Exciter.** The finger is a Gaussian contact force pulse (σ 0.1–0.36 ms, a smooth spectrum with no gaps): harder strikes are narrower and reach higher modes. A short burst of lowpassed noise, different every time, adds the skin of the finger.
 - **Strike position.** The fundamental mode is strongest at the centre of a field, the octave modes have a nodal line through it and peak towards the edge, the twelfth rises near the edge.
